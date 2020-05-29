@@ -16,7 +16,6 @@
  */
 package org.apache.rocketmq.example.quickstart;
 
-import java.util.List;
 import org.apache.rocketmq.client.consumer.DefaultMQPushConsumer;
 import org.apache.rocketmq.client.consumer.listener.ConsumeConcurrentlyContext;
 import org.apache.rocketmq.client.consumer.listener.ConsumeConcurrentlyStatus;
@@ -24,6 +23,9 @@ import org.apache.rocketmq.client.consumer.listener.MessageListenerConcurrently;
 import org.apache.rocketmq.client.exception.MQClientException;
 import org.apache.rocketmq.common.consumer.ConsumeFromWhere;
 import org.apache.rocketmq.common.message.MessageExt;
+
+import java.nio.charset.StandardCharsets;
+import java.util.List;
 
 /**
  * This example shows how to subscribe and consume messages using providing {@link DefaultMQPushConsumer}.
@@ -49,6 +51,8 @@ public class Consumer {
          * </pre>
          */
 
+        consumer.setNamesrvAddr("127.0.0.1:9876");
+
         /*
          * Specify where to start in case the specified consumer group is a brand new one.
          */
@@ -67,7 +71,9 @@ public class Consumer {
             @Override
             public ConsumeConcurrentlyStatus consumeMessage(List<MessageExt> msgs,
                 ConsumeConcurrentlyContext context) {
-                System.out.printf("%s Receive New Messages: %s %n", Thread.currentThread().getName(), msgs);
+                for (MessageExt msg : msgs) {
+                    System.out.printf("%s Receive New Messages: %s %n", Thread.currentThread().getName(), new String(msg.getBody(), StandardCharsets.UTF_8));
+                }
                 return ConsumeConcurrentlyStatus.CONSUME_SUCCESS;
             }
         });
