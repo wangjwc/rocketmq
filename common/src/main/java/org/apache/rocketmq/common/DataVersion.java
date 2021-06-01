@@ -16,9 +16,13 @@
  */
 package org.apache.rocketmq.common;
 
-import java.util.concurrent.atomic.AtomicLong;
 import org.apache.rocketmq.remoting.protocol.RemotingSerializable;
 
+import java.util.concurrent.atomic.AtomicLong;
+
+/**
+ * 时间戳 + counter 唯一确定一个版本号。当更新topic配置时，执行nextVersion()刷新版本
+ */
 public class DataVersion extends RemotingSerializable {
     private long timestamp = System.currentTimeMillis();
     private AtomicLong counter = new AtomicLong(0);

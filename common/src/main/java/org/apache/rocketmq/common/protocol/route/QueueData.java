@@ -20,6 +20,15 @@
  */
 package org.apache.rocketmq.common.protocol.route;
 
+/**
+ *  {
+ *      "brokerName": "broker-a",
+ *      "readQueueNums": 4,
+ *      "writeQueueNums": 4,
+ *      "perm": 6, // 读写权限，具体含义参考PermName
+ *      "topicSynFlag": 0 // topic同步标记，具体含义参考TopicSysFlag
+ *  }
+ */
 public class QueueData implements Comparable<QueueData> {
     private String brokerName;
     private int readQueueNums;

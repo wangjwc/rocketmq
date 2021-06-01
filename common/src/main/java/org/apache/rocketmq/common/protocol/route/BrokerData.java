@@ -17,12 +17,23 @@
 
 package org.apache.rocketmq.common.protocol.route;
 
+import org.apache.rocketmq.common.MixAll;
+
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Random;
-import org.apache.rocketmq.common.MixAll;
 
+/**
+ * {
+ *     "cluster": "c1",
+ *     "brokerName": "broker-a",
+ *     "brokerAddrs": {
+ *         0: "192.168.53.1:10000",
+ *         1: "192.168.53.2:10000"
+ *     }
+ * }
+ */
 public class BrokerData implements Comparable<BrokerData> {
     private String cluster;
     private String brokerName;
