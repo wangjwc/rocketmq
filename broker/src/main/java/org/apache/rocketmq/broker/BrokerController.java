@@ -914,7 +914,7 @@ public class BrokerController {
         }
 
         /**
-         *
+         * 注册路由
          */
         if (forceRegister || needRegister(this.brokerConfig.getBrokerClusterName(),
             this.getBrokerAddr(),
