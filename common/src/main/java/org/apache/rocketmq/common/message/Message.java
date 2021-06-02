@@ -25,10 +25,29 @@ import java.util.Map;
 public class Message implements Serializable {
     private static final long serialVersionUID = 8445773977080406428L;
 
+    /**
+     * 主题
+     */
     private String topic;
+
+    /**
+     * 未发现具体作用
+     */
     private int flag;
+
+    /**
+     * 存储tag、keys等信息
+     */
     private Map<String, String> properties;
+
+    /**
+     * 消息体
+     */
     private byte[] body;
+
+    /**
+     * 事务id
+     */
     private String transactionId;
 
     public Message() {
@@ -38,6 +57,15 @@ public class Message implements Serializable {
         this(topic, "", "", 0, body, true);
     }
 
+    /**
+     *
+     * @param topic 主题
+     * @param tags TAG，主要用于消息过滤。存储在MessageConst.PROPERTY_TAGS
+     * @param keys 消息索引键，多个使用空格分隔，RocketMQ可以根据这些key快速检索消息。存储在MessageConst.PROPERTY_KEYS
+     * @param flag 未发现具体作用
+     * @param body 消息体
+     * @param waitStoreMsgOK 消息发送时，是否等消息存储完成后再返回（可以保证消息不丢失）
+     */
     public Message(String topic, String tags, String keys, int flag, byte[] body, boolean waitStoreMsgOK) {
         this.topic = topic;
         this.flag = flag;
