@@ -913,6 +913,9 @@ public class BrokerController {
             topicConfigWrapper.setTopicConfigTable(topicConfigTable);
         }
 
+        /**
+         *
+         */
         if (forceRegister || needRegister(this.brokerConfig.getBrokerClusterName(),
             this.getBrokerAddr(),
             this.brokerConfig.getBrokerName(),
@@ -923,7 +926,9 @@ public class BrokerController {
     }
 
     /**
-     * 将broker注册到NameServer
+     * 将broker注册到NameServer，在NameServer上维护Broker的topic配置、Broker地址、集群和Broker映射缓存、存活状态&心跳检查channel等信息
+     * 详情参见：
+     * @see org.apache.rocketmq.namesrv.routeinfo.RouteInfoManager#registerBroker
      * @param checkOrderConfig
      * @param oneway
      * @param topicConfigWrapper
@@ -943,22 +948,38 @@ public class BrokerController {
             this.brokerConfig.getRegisterBrokerTimeoutMills(),
             this.brokerConfig.isCompressedRegister());
 
+        /*
+         * 主从同步服务信息(如果当前broker不是master，则更新haService信息)
+         */
         if (registerBrokerResultList.size() > 0) {
             RegisterBrokerResult registerBrokerResult = registerBrokerResultList.get(0);
             if (registerBrokerResult != null) {
                 if (this.updateMasterHAServerAddrPeriodically && registerBrokerResult.getHaServerAddr() != null) {
+                    // maser broker的HaServer地址
                     this.messageStore.updateHaMasterAddress(registerBrokerResult.getHaServerAddr());
                 }
-
+                // maser broker的地址
                 this.slaveSynchronize.setMasterAddr(registerBrokerResult.getMasterAddr());
 
                 if (checkOrderConfig) {
+                    // 更新顺序消息配置
+                    // 该返回值取自NameServer中的KVConfigManager.getKVListByNamespace(NamesrvUtil.NAMESPACE_ORDER_TOPIC_CONFIG);
+                    // 这个得吐槽下，接口返回值设计太糟糕了
                     this.getTopicConfigManager().updateOrderTopicConfig(registerBrokerResult.getKvTable());
                 }
             }
         }
     }
 
+    /**
+     * 查询NameServer上注册的broker对应的topic配置版本号是否与当前不一致，如果不一致则说明需要重新注册，返回true
+     * @param clusterName
+     * @param brokerAddr
+     * @param brokerName
+     * @param brokerId
+     * @param timeoutMills
+     * @return
+     */
     private boolean needRegister(final String clusterName,
         final String brokerAddr,
         final String brokerName,

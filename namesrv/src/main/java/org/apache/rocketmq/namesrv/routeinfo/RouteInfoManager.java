@@ -229,6 +229,9 @@ public class RouteInfoManager {
                     }
                 }
 
+                /*
+                 * 如果发起注册的broker实例不是master，则返回HaServer信息用于主从同步
+                 */
                 if (MixAll.MASTER_ID != brokerId) {
                     String masterAddr = brokerData.getBrokerAddrs().get(MixAll.MASTER_ID);
                     if (masterAddr != null) {
