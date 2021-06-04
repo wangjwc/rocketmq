@@ -47,8 +47,12 @@ public class ClientLogger {
     //private static Appender rocketmqClientAppender = null;
 
     static {
+        /*
+         * 是否启用slf4j日志 启动参数-Drocketmq.client.logUseSlf4j=true
+         */
         CLIENT_USE_SLF4J = Boolean.parseBoolean(System.getProperty(CLIENT_LOG_USESLF4J, "false"));
         if (!CLIENT_USE_SLF4J) {
+            // 使用inner日志
             InternalLoggerFactory.setCurrentLoggerType(InnerLoggerFactory.LOGGER_INNER);
             CLIENT_LOGGER = createLogger(LoggerName.CLIENT_LOGGER_NAME);
             createLogger(LoggerName.COMMON_LOGGER_NAME);
@@ -58,13 +62,20 @@ public class ClientLogger {
         }
     }
 
+    /**
+     * 创建Appender
+     * @return
+     */
     private static synchronized Appender createClientAppender() {
+        // 日志存储路径
         String clientLogRoot = System.getProperty(CLIENT_LOG_ROOT, System.getProperty("user.home") + "/logs/rocketmqlogs");
         String clientLogMaxIndex = System.getProperty(CLIENT_LOG_MAXINDEX, "10");
+        // 日志文件名
         String clientLogFileName = System.getProperty(CLIENT_LOG_FILENAME, "rocketmq_client.log");
         String maxFileSize = System.getProperty(CLIENT_LOG_FILESIZE, "1073741824");
         String asyncQueueSize = System.getProperty(CLIENT_LOG_ASYNC_QUEUESIZE, "1024");
 
+        // 日志文件路径
         String logFileName = clientLogRoot + "/" + clientLogFileName;
 
         int maxFileIndex = Integer.parseInt(clientLogMaxIndex);
@@ -81,8 +92,10 @@ public class ClientLogger {
     }
 
     private static InternalLogger createLogger(final String loggerName) {
+        // 日志级别
         String clientLogLevel = System.getProperty(CLIENT_LOG_LEVEL, "INFO");
         boolean additive = "true".equalsIgnoreCase(System.getProperty(CLIENT_LOG_ADDITIVE));
+        // 构造日志
         InternalLogger logger = InternalLoggerFactory.getLogger(loggerName);
         InnerLoggerFactory.InnerLogger innerLogger = (InnerLoggerFactory.InnerLogger) logger;
         Logger realLogger = innerLogger.getLogger();
@@ -90,8 +103,8 @@ public class ClientLogger {
         //if (rocketmqClientAppender == null) {
         //   createClientAppender();
         //}
-
-        realLogger.addAppender(new AppenderProxy());
+        // 设置appender
+        realLogger.addAppender(new AppenderProxy()); // createClientAppender
         realLogger.setLevel(Level.toLevel(clientLogLevel));
         realLogger.setAdditivity(additive);
         return logger;

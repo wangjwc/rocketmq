@@ -86,32 +86,45 @@ public class NamespaceUtil {
             return resourceWithOutNamespace;
         }
 
+        // 是否内部资源或者已经添加过namespace前缀
         if (isSystemResource(resourceWithOutNamespace) || isAlreadyWithNamespace(resourceWithOutNamespace, namespace)) {
             return resourceWithOutNamespace;
         }
 
+        // 如果是%RETRY%或%DLQ%开头，则删除对应前缀后返回
         String resourceWithoutRetryAndDLQ = withOutRetryAndDLQ(resourceWithOutNamespace);
         StringBuilder stringBuilder = new StringBuilder();
 
+        // 重新添加前缀
         if (isRetryTopic(resourceWithOutNamespace)) {
             stringBuilder.append(MixAll.RETRY_GROUP_TOPIC_PREFIX);
         }
 
+        // 重新添加前缀
         if (isDLQTopic(resourceWithOutNamespace)) {
             stringBuilder.append(MixAll.DLQ_GROUP_TOPIC_PREFIX);
         }
 
+        // 添加namespace前缀
         return stringBuilder.append(namespace).append(NAMESPACE_SEPARATOR).append(resourceWithoutRetryAndDLQ).toString();
 
     }
 
+    /**
+     * 已添加过namespace
+     * @param resource
+     * @param namespace
+     * @return
+     */
     public static boolean isAlreadyWithNamespace(String resource, String namespace) {
         if (StringUtils.isEmpty(namespace) || StringUtils.isEmpty(resource) || isSystemResource(resource)) {
             return false;
         }
 
+        // 如果是%RETRY%或%DLQ%开头，则删除对应前缀后返回
         String resourceWithoutRetryAndDLQ = withOutRetryAndDLQ(resource);
 
+        // 是否有namespace前缀
         return resourceWithoutRetryAndDLQ.startsWith(namespace + NAMESPACE_SEPARATOR);
     }
 
@@ -136,16 +149,24 @@ public class NamespaceUtil {
         return index > 0 ? resourceWithoutRetryAndDLQ.substring(0, index) : STRING_BLANK;
     }
 
+    /**
+     * 如果是%RETRY%或%DLQ%开头，则删除对应前缀后返回
+     * @param originalResource
+     * @return
+     */
     private static String withOutRetryAndDLQ(String originalResource) {
         if (StringUtils.isEmpty(originalResource)) {
             return STRING_BLANK;
         }
+
+        // 是否%RETRY%开头
         if (isRetryTopic(originalResource)) {
-            return originalResource.substring(RETRY_PREFIX_LENGTH);
+            return originalResource.substring(RETRY_PREFIX_LENGTH); // 删除前缀
         }
 
+        // 是否%DLQ%开头
         if (isDLQTopic(originalResource)) {
-            return originalResource.substring(DLQ_PREFIX_LENGTH);
+            return originalResource.substring(DLQ_PREFIX_LENGTH); // 删除前缀
         }
 
         return originalResource;
@@ -163,6 +184,11 @@ public class NamespaceUtil {
         return false;
     }
 
+    /**
+     * %RETRY%开头
+     * @param resource
+     * @return
+     */
     public static boolean isRetryTopic(String resource) {
         return StringUtils.isNotBlank(resource) && resource.startsWith(MixAll.RETRY_GROUP_TOPIC_PREFIX);
     }

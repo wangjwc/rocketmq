@@ -45,9 +45,11 @@ public abstract class InternalLoggerFactory {
             internalLoggerFactory = loggerFactoryCache.get(loggerType);
         }
         if (internalLoggerFactory == null) {
+            // slf4j
             internalLoggerFactory = loggerFactoryCache.get(DEFAULT_LOGGER);
         }
         if (internalLoggerFactory == null) {
+            // inner
             internalLoggerFactory = loggerFactoryCache.get(LOGGER_INNER);
         }
         if (internalLoggerFactory == null) {
@@ -61,11 +63,21 @@ public abstract class InternalLoggerFactory {
     }
 
     static {
+        /**
+         * 注册Slf4jLoggerFactory（构造函数中调用doRegister）
+         * InternalLoggerFactory.LOGGER_SLF4J
+         */
         try {
+            // 如果在两个线程中同时初始化自类和父类，则会发生class load deadlock
             new Slf4jLoggerFactory();
         } catch (Throwable e) {
             //ignore
         }
+
+        /**
+         * 注册InnerLoggerFactory（构造函数中调用doRegister）
+         * InternalLoggerFactory#LOGGER_INNER
+         */
         try {
             new InnerLoggerFactory();
         } catch (Throwable e) {

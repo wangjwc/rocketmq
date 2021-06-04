@@ -36,6 +36,7 @@ public class MyConsumerTest {
     public static final String TEST_CONSUMER_GROUP = "wjw_test_consumer_group";
 
     public static void main(String[] args) throws InterruptedException, MQClientException {
+        System.setProperty("rocketmq.client.logUseSlf4j", "true");
 
         /*
          * Instantiate with specified consumer group name.

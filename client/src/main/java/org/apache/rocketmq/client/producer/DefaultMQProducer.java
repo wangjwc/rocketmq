@@ -16,9 +16,6 @@
  */
 package org.apache.rocketmq.client.producer;
 
-import java.util.Collection;
-import java.util.List;
-import java.util.concurrent.ExecutorService;
 import org.apache.rocketmq.client.ClientConfig;
 import org.apache.rocketmq.client.QueryResult;
 import org.apache.rocketmq.client.Validators;
@@ -31,17 +28,15 @@ import org.apache.rocketmq.client.trace.AsyncTraceDispatcher;
 import org.apache.rocketmq.client.trace.TraceDispatcher;
 import org.apache.rocketmq.client.trace.hook.SendMessageTraceHookImpl;
 import org.apache.rocketmq.common.MixAll;
-import org.apache.rocketmq.common.message.Message;
-import org.apache.rocketmq.common.message.MessageBatch;
-import org.apache.rocketmq.common.message.MessageClientIDSetter;
-import org.apache.rocketmq.common.message.MessageDecoder;
-import org.apache.rocketmq.common.message.MessageExt;
-import org.apache.rocketmq.common.message.MessageId;
-import org.apache.rocketmq.common.message.MessageQueue;
+import org.apache.rocketmq.common.message.*;
 import org.apache.rocketmq.common.topic.TopicValidator;
 import org.apache.rocketmq.logging.InternalLogger;
 import org.apache.rocketmq.remoting.RPCHook;
 import org.apache.rocketmq.remoting.exception.RemotingException;
+
+import java.util.Collection;
+import java.util.List;
+import java.util.concurrent.ExecutorService;
 
 /**
  * This class is the entry point for applications intending to send messages. </p>
@@ -59,6 +54,7 @@ public class DefaultMQProducer extends ClientConfig implements MQProducer {
 
     /**
      * Wrapping internal implementations for virtually all methods presented in this class.
+     * 生产者的内部默认实现，在构造生产者时内部自动初始化，提供了大部分方法的内部实现。
      */
     protected final transient DefaultMQProducerImpl defaultMQProducerImpl;
     private final InternalLogger log = ClientLogger.getLog();
@@ -66,36 +62,56 @@ public class DefaultMQProducer extends ClientConfig implements MQProducer {
      * Producer group conceptually aggregates all producer instances of exactly same role, which is particularly
      * important when transactional messages are involved. </p>
      *
-     * For non-transactional messages, it does not matter as long as it's unique per process. </p>
-     *
+     *  For non-transactional messages, it does not matter as long as it's unique per process. </p>
      * See {@linktourl http://rocketmq.apache.org/docs/core-concept/} for more discussion.
+     *
+     * 生产者的分组名称。相同的分组名称表明生产者实例在概念上归属于同一分组。
+     * 这对事务消息十分重要，如果原始生产者在事务之后崩溃，
+     * 那么broker可以联系同一生产者分组的不同生产者实例来提交或回滚事务。
      */
     private String producerGroup;
 
     /**
      * Just for testing or demo program
+     *
+     * 在发送消息时，自动创建服务器不存在的topic，需要指定Key，该Key可用于配置发送消息所在topic的默认路由。
+     * 测试或者demo使用，生产环境下不建议打开自动创建配置。
      */
     private String createTopicKey = TopicValidator.AUTO_CREATE_TOPIC_KEY_TOPIC;
 
     /**
      * Number of queues to create per default topic.
+     *
+     * 创建topic时默认的队列数量。
      */
     private volatile int defaultTopicQueueNums = 4;
 
     /**
      * Timeout for sending messages.
+     *
+     * 发送消息时的超时时间，默认值：3000，单位：毫秒
+     * 建议：不建议修改该值，该值应该与broker配置中的sendTimeout一致，发送超时，可临时修改该值，建议解决超时问题，提高broker集群的Tps。
+     * 如果存在重试的情况，这里的超时时间是根据多次重试累积的时间来判断的
      */
     private int sendMsgTimeout = 3000;
 
     /**
      * Compress message body threshold, namely, message body larger than 4k will be compressed on default.
+     *
+     * 压缩消息体阈值。大于4K的消息体将默认进行压缩。
+     * 默认值：1024 * 4，单位：字节
+     * 建议：可通过DefaultMQProducerImpl.setZipCompressLevel方法设置压缩率（默认为5，可选范围[0,9]）；
+     * 可通过DefaultMQProducerImpl.tryToCompressMessage方法测试出compressLevel与compressMsgBodyOverHowmuch最佳值。
      */
     private int compressMsgBodyOverHowmuch = 1024 * 4;
 
     /**
      * Maximum number of retry to perform internally before claiming sending failure in synchronous mode. </p>
-     *
      * This may potentially cause message duplication which is up to application developers to resolve.
+     *
+     * 同步模式下，在返回发送失败之前，内部尝试重新发送消息的最大次数。
+     * 默认值：2，即：默认情况下一条消息最多会被投递3次。
+     * 注意：在极端情况下，这可能会导致消息的重复（比如返回超时时的重试）
      */
     private int retryTimesWhenSendFailed = 2;
 
@@ -103,21 +119,35 @@ public class DefaultMQProducer extends ClientConfig implements MQProducer {
      * Maximum number of retry to perform internally before claiming sending failure in asynchronous mode. </p>
      *
      * This may potentially cause message duplication which is up to application developers to resolve.
+     *
+     * 异步模式下，在发送失败之前，内部尝试重新发送消息的最大次数。
+     * 默认值：2，即：默认情况下一条消息最多会被投递3次。
+     * 注意：在极端情况下，这可能会导致消息的重复（比如返回超时时的重试）
      */
     private int retryTimesWhenSendAsyncFailed = 2;
 
     /**
      * Indicate whether to retry another broker on sending failure internally.
+     *
+     * 同步模式下，消息保存失败时是否重试其他broker。
+     * 默认值：false
+     * 注意：此配置关闭时，非投递时产生异常情况下(即broker明确返回失败状态而不是网络等原因导致异常），会忽略retryTimesWhenSendFailed配置。
      */
     private boolean retryAnotherBrokerWhenNotStoreOK = false;
 
     /**
      * Maximum allowed message size in bytes.
+     *
+     * 消息的最大大小。当消息题的字节数超过maxMessageSize就发送失败。
+     * 默认值：1024 * 1024 * 4，单位：字节 (4MB)
      */
     private int maxMessageSize = 1024 * 1024 * 4; // 4M
 
     /**
      * Interface of asynchronous transfer data
+     *
+     * 在开启消息追踪后，该类通过hook的方式把消息生产者、消息存储的broker和消费者消费消息的信息像链路一样记录下来。
+     * 在构造生产者时根据构造入参enableMsgTrace来决定是否创建该对象。
      */
     private TraceDispatcher traceDispatcher = null;
 
@@ -268,6 +298,7 @@ public class DefaultMQProducer extends ClientConfig implements MQProducer {
      */
     @Override
     public void start() throws MQClientException {
+        // 重设生产分组：添加namespace前缀
         this.setProducerGroup(withNamespace(this.producerGroup));
         this.defaultMQProducerImpl.start();
         if (null != traceDispatcher) {
@@ -321,6 +352,7 @@ public class DefaultMQProducer extends ClientConfig implements MQProducer {
     public SendResult send(
         Message msg) throws MQClientException, RemotingException, MQBrokerException, InterruptedException {
         Validators.checkMessage(msg, this);
+        // 添加namespace前缀
         msg.setTopic(withNamespace(msg.getTopic()));
         return this.defaultMQProducerImpl.send(msg);
     }

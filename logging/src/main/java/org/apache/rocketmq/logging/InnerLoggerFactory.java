@@ -43,6 +43,9 @@ public class InnerLoggerFactory extends InternalLoggerFactory {
         Logger.getRepository().shutdown();
     }
 
+    /**
+     * RocketMq自定义日志类
+     */
     public static class InnerLogger implements InternalLogger {
 
         private Logger logger;

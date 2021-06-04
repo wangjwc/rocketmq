@@ -16,10 +16,6 @@
  */
 package org.apache.rocketmq.client;
 
-import java.util.Collection;
-import java.util.HashSet;
-import java.util.Iterator;
-import java.util.Set;
 import org.apache.commons.lang3.StringUtils;
 import org.apache.rocketmq.common.UtilAll;
 import org.apache.rocketmq.common.message.MessageQueue;
@@ -29,15 +25,34 @@ import org.apache.rocketmq.remoting.common.RemotingUtil;
 import org.apache.rocketmq.remoting.netty.TlsSystemConfig;
 import org.apache.rocketmq.remoting.protocol.LanguageCode;
 
+import java.util.Collection;
+import java.util.HashSet;
+import java.util.Iterator;
+import java.util.Set;
+
 /**
  * Client Common configuration
  */
 public class ClientConfig {
     public static final String SEND_MESSAGE_WITH_VIP_CHANNEL_PROPERTY = "com.rocketmq.sendMessageWithVIPChannel";
     private String namesrvAddr = NameServerAddressUtils.getNameServerAddresses();
+    /**
+     * 客户端ip：可用于生产clientId
+     */
     private String clientIP = RemotingUtil.getLocalAddress();
+
+    /**
+     * 实例名：可用于生产clientId
+     *
+     * 如果实例名是DEFAULT，则在客户端start时，会被替换为进程id
+     */
     private String instanceName = System.getProperty("rocketmq.client.name", "DEFAULT");
     private int clientCallbackExecutorThreads = Runtime.getRuntime().availableProcessors();
+
+    /**
+     * 生产组合消费组在内部处理时时会加上namespace前缀
+     * @see ClientConfig#withNamespace(java.lang.String)
+     */
     protected String namespace;
     protected AccessChannel accessChannel = AccessChannel.LOCAL;
 
@@ -62,6 +77,10 @@ public class ClientConfig {
 
     private LanguageCode language = LanguageCode.JAVA;
 
+    /**
+     * IP@instanceName@unitName
+     * @return
+     */
     public String buildMQClientId() {
         StringBuilder sb = new StringBuilder();
         sb.append(this.getClientIP());
@@ -92,12 +111,16 @@ public class ClientConfig {
         this.instanceName = instanceName;
     }
 
+    /**
+     * 如果实例名是DEFAULT，则替换为进程id
+     */
     public void changeInstanceNameToPID() {
         if (this.instanceName.equals("DEFAULT")) {
             this.instanceName = String.valueOf(UtilAll.getPid());
         }
     }
 
+    // 尝试添加namespace前缀
     public String withNamespace(String resource) {
         return NamespaceUtil.wrapNamespace(this.getNamespace(), resource);
     }
@@ -279,7 +302,9 @@ public class ClientConfig {
         }
 
         if (StringUtils.isNotEmpty(this.namesrvAddr)) {
+            // 匹配http://MQ_INST_a_b.c
             if (NameServerAddressUtils.validateInstanceEndpoint(namesrvAddr)) {
+                // 截取MQ_INST_a_b
                 return NameServerAddressUtils.parseInstanceIdFromEndpoint(namesrvAddr);
             }
         }

@@ -42,6 +42,9 @@ import java.io.InputStream;
 import java.util.Properties;
 import java.util.concurrent.Callable;
 
+/**
+ * 环境变量：ROCKETMQ_HOME=/Users/wangjingwang/work/IdeaProjects/learn/MQ/rocketmq_home
+ */
 public class NamesrvStartup {
 
     private static InternalLogger log;
