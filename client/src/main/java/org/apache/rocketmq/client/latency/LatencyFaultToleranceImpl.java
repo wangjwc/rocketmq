@@ -17,32 +17,48 @@
 
 package org.apache.rocketmq.client.latency;
 
+import org.apache.rocketmq.client.common.ThreadLocalIndex;
+
 import java.util.Collections;
 import java.util.Enumeration;
 import java.util.LinkedList;
 import java.util.List;
 import java.util.concurrent.ConcurrentHashMap;
-import org.apache.rocketmq.client.common.ThreadLocalIndex;
 
 public class LatencyFaultToleranceImpl implements LatencyFaultTolerance<String> {
+    /**
+     * 延迟记录器（记录每个broker最新的投递延迟，对于投递失败的，将延迟设置为30秒，以便等待本地broker信息更新）
+     */
     private final ConcurrentHashMap<String, FaultItem> faultItemTable = new ConcurrentHashMap<String, FaultItem>(16);
 
+    /**
+     * 递增器
+     */
     private final ThreadLocalIndex whichItemWorst = new ThreadLocalIndex();
 
+    /**
+     * 更新broker发送延迟
+     * @param brokerName 本次投递的broker
+     * @param currentLatency 本次投递broker耗时
+     * @param notAvailableDuration 非活跃时间（即规避时间）(对于投递失败的，将延迟设置为180秒)
+     */
     @Override
     public void updateFaultItem(final String name, final long currentLatency, final long notAvailableDuration) {
         FaultItem old = this.faultItemTable.get(name);
         if (null == old) {
+            // 新增
             final FaultItem faultItem = new FaultItem(name);
             faultItem.setCurrentLatency(currentLatency);
             faultItem.setStartTimestamp(System.currentTimeMillis() + notAvailableDuration);
 
             old = this.faultItemTable.putIfAbsent(name, faultItem);
             if (old != null) {
+                // 遇到并发了，执行更新
                 old.setCurrentLatency(currentLatency);
                 old.setStartTimestamp(System.currentTimeMillis() + notAvailableDuration);
             }
         } else {
+            // 更新
             old.setCurrentLatency(currentLatency);
             old.setStartTimestamp(System.currentTimeMillis() + notAvailableDuration);
         }
@@ -71,6 +87,9 @@ public class LatencyFaultToleranceImpl implements LatencyFaultTolerance<String> 
             tmpList.add(faultItem);
         }
 
+        /**
+         * 排序，再从前半段中随机取一个。。。。有啥作用？？？？直接取最小的不就行了？？？
+         */
         if (!tmpList.isEmpty()) {
             Collections.shuffle(tmpList);
 
@@ -98,15 +117,31 @@ public class LatencyFaultToleranceImpl implements LatencyFaultTolerance<String> 
 
     class FaultItem implements Comparable<FaultItem> {
         private final String name;
+        /**
+         * 上次投递时间（每次投递都会更新）
+         */
         private volatile long currentLatency;
+
+        /**
+         * 开始活跃时间（即到达该时间后背标记为活跃状态） = 创建时间 + 规避时长（每次投递都会更新）
+         */
         private volatile long startTimestamp;
 
         public FaultItem(final String name) {
             this.name = name;
         }
 
+        /**
+         * 排序
+         * 第一优先available的
+         * 第二优先延迟小的
+         * 第三优先解禁早的
+         * @param other
+         * @return
+         */
         @Override
         public int compareTo(final FaultItem other) {
+            // 优先available的
             if (this.isAvailable() != other.isAvailable()) {
                 if (this.isAvailable())
                     return -1;
@@ -115,12 +150,14 @@ public class LatencyFaultToleranceImpl implements LatencyFaultTolerance<String> 
                     return 1;
             }
 
+            // 优先延迟小的
             if (this.currentLatency < other.currentLatency)
                 return -1;
             else if (this.currentLatency > other.currentLatency) {
                 return 1;
             }
 
+            // 优先解禁早的
             if (this.startTimestamp < other.startTimestamp)
                 return -1;
             else if (this.startTimestamp > other.startTimestamp) {
@@ -131,6 +168,7 @@ public class LatencyFaultToleranceImpl implements LatencyFaultTolerance<String> 
         }
 
         public boolean isAvailable() {
+            // 当前时间大于设定时间
             return (System.currentTimeMillis() - startTimestamp) >= 0;
         }
 

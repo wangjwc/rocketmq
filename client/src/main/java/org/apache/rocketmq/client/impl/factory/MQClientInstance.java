@@ -137,7 +137,7 @@ public class MQClientInstance {
         info.setTopicRouteData(route);
         if (route.getOrderTopicConf() != null && route.getOrderTopicConf().length() > 0) {
             String[] brokers = route.getOrderTopicConf().split(";");
-            for (String broker : brokers) {
+            for (String broker : brokers) { // brokerName:queueNum
                 String[] item = broker.split(":");
                 int nums = Integer.parseInt(item[1]);
                 for (int i = 0; i < nums; i++) {
@@ -152,6 +152,9 @@ public class MQClientInstance {
             Collections.sort(qds);
             for (QueueData qd : qds) {
                 if (PermName.isWriteable(qd.getPerm())) {
+                    /*
+                     * 查找QueueData对应的BrokerData
+                     */
                     BrokerData brokerData = null;
                     for (BrokerData bd : route.getBrokerDatas()) {
                         if (bd.getBrokerName().equals(qd.getBrokerName())) {
@@ -160,14 +163,17 @@ public class MQClientInstance {
                         }
                     }
 
+                    // 抛弃没有broker的队列
                     if (null == brokerData) {
                         continue;
                     }
 
+                    // 抛弃对应broker没有主节点的队列
                     if (!brokerData.getBrokerAddrs().containsKey(MixAll.MASTER_ID)) {
                         continue;
                     }
 
+                    // 添加到全量队列中(所有broker的队列都放在一起方便路由）
                     for (int i = 0; i < qd.getWriteQueueNums(); i++) {
                         MessageQueue mq = new MessageQueue(topic, qd.getBrokerName(), i);
                         info.getMessageQueueList().add(mq);
@@ -184,6 +190,9 @@ public class MQClientInstance {
     public static Set<MessageQueue> topicRouteData2TopicSubscribeInfo(final String topic, final TopicRouteData route) {
         Set<MessageQueue> mqList = new HashSet<MessageQueue>();
         List<QueueData> qds = route.getQueueDatas();
+        /*
+         * 为每个队列元数据按照readQueueNums的数量生成消费队列(例如有两个broker，每个有4个读队列，则一共有8个消费队列）
+         */
         for (QueueData qd : qds) {
             if (PermName.isReadable(qd.getPerm())) {
                 for (int i = 0; i < qd.getReadQueueNums(); i++) {
@@ -211,7 +220,7 @@ public class MQClientInstance {
                     // 启动网络客户端（netty）
                     this.mQClientAPIImpl.start();
                     // Start various schedule tasks
-                    // 如果没有指定NameServer地址，则启动一个定时任务不停的从http服务区获取最新的NameServer地址列表，以便热部署
+                    // 启动定时任务：更新NameServer地址(远程配置方式）、更新路由信息、发送客户端心跳等等
                     this.startScheduledTask();
                     // Start pull service
                     // 启动PullMessageService线程，处理pullRequest // TODO 2021/6/3 下午6:16 好像只有consume有用？
@@ -234,10 +243,16 @@ public class MQClientInstance {
     }
 
     /**
-     * 如果没有指定NameServer地址，则启动一个定时任务不停的从http服务区获取最新的NameServer地址列表，以便热部署
+     * 1、如果没有指定NameServer地址，则启动一个定时任务不停的从http服务区获取最新的NameServer地址列表，以便热部署
+     * 2、定时拉取broker路由信息
+     * 3、清除过期broker、发送客户端心跳和过滤器
      */
     private void startScheduledTask() {
         if (null == this.clientConfig.getNamesrvAddr()) {
+            /**
+             * 如果没有指定NameServer地址，则启动一个定时任务不停的从http服务区获取最新的NameServer地址列表，以便热部署）
+             * 120秒
+             */
             this.scheduledExecutorService.scheduleAtFixedRate(new Runnable() {
 
                 @Override
@@ -251,6 +266,9 @@ public class MQClientInstance {
             }, 1000 * 10, 1000 * 60 * 2, TimeUnit.MILLISECONDS);
         }
 
+        /**
+         * 拉取路由信息（默认30秒）
+         */
         this.scheduledExecutorService.scheduleAtFixedRate(new Runnable() {
 
             @Override
@@ -263,6 +281,9 @@ public class MQClientInstance {
             }
         }, 10, this.clientConfig.getPollNameServerInterval(), TimeUnit.MILLISECONDS);
 
+        /**
+         * 清除过期broker、发送客户端心跳和过滤器(默认30秒）
+         */
         this.scheduledExecutorService.scheduleAtFixedRate(new Runnable() {
 
             @Override
@@ -276,6 +297,9 @@ public class MQClientInstance {
             }
         }, 1000, this.clientConfig.getHeartbeatBrokerInterval(), TimeUnit.MILLISECONDS);
 
+        /**
+         * 持久化消费偏移量(默认5秒）what is this??
+         */
         this.scheduledExecutorService.scheduleAtFixedRate(new Runnable() {
 
             @Override
@@ -288,6 +312,9 @@ public class MQClientInstance {
             }
         }, 1000 * 10, this.clientConfig.getPersistConsumerOffsetInterval(), TimeUnit.MILLISECONDS);
 
+        /**
+         * 调整消费线程池大小
+         */
         this.scheduledExecutorService.scheduleAtFixedRate(new Runnable() {
 
             @Override
@@ -592,7 +619,11 @@ public class MQClientInstance {
             if (this.lockNamesrv.tryLock(LOCK_TIMEOUT_MILLIS, TimeUnit.MILLISECONDS)) {
                 try {
                     TopicRouteData topicRouteData;
+                    /*
+                     * 当topic不存在时，设置参数isDefault=true，则查询DefaultMQProducer.createTopicKey（默认是系统topic：TBW102）的路由信息作为默认路由配置
+                     */
                     if (isDefault && defaultMQProducer != null) {
+                        // 查询DefaultMQProducer.createTopicKey的路由信息
                         topicRouteData = this.mQClientAPIImpl.getDefaultTopicRouteInfoFromNameServer(defaultMQProducer.getCreateTopicKey(),
                             1000 * 3);
                         if (topicRouteData != null) {
@@ -618,27 +649,32 @@ public class MQClientInstance {
                         if (changed) {
                             TopicRouteData cloneTopicRouteData = topicRouteData.cloneTopicRouteData();
 
+                            // 更新broker地址列表
                             for (BrokerData bd : topicRouteData.getBrokerDatas()) {
                                 this.brokerAddrTable.put(bd.getBrokerName(), bd.getBrokerAddrs());
                             }
 
-                            // Update Pub info
+                            // Update Pub info 更新发布信息
                             {
+                                // 路由信息转为TopicPublishInfo
                                 TopicPublishInfo publishInfo = topicRouteData2TopicPublishInfo(topic, topicRouteData);
                                 publishInfo.setHaveTopicRouterInfo(true);
+                                // 更新produceGroup缓存中的publishInfo produce客户端使用
                                 Iterator<Entry<String, MQProducerInner>> it = this.producerTable.entrySet().iterator();
                                 while (it.hasNext()) {
                                     Entry<String, MQProducerInner> entry = it.next();
                                     MQProducerInner impl = entry.getValue();
                                     if (impl != null) {
+                                        // 更新缓存
                                         impl.updateTopicPublishInfo(topic, publishInfo);
                                     }
                                 }
                             }
 
-                            // Update sub info
+                            // Update sub info 更新订阅信息
                             {
                                 Set<MessageQueue> subscribeInfo = topicRouteData2TopicSubscribeInfo(topic, topicRouteData);
+                                // 更新produceGroup缓存中的publishInfo consumer客户端使用
                                 Iterator<Entry<String, MQConsumerInner>> it = this.consumerTable.entrySet().iterator();
                                 while (it.hasNext()) {
                                     Entry<String, MQConsumerInner> entry = it.next();

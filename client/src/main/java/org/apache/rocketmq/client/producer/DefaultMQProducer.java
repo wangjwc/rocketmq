@@ -1083,6 +1083,13 @@ public class DefaultMQProducer extends ClientConfig implements MQProducer {
         return this.defaultMQProducerImpl.isSendLatencyFaultEnable();
     }
 
+    /**
+     * 是否开启故障规避处理策略
+     *
+     * 开启后，在发送消息时，会过滤掉not available的broker
+     * （ps：not available的判断是根据前面发送失败的作故障规避处理。比如上次broker-a投递失败，则在30s内不在向该broker投递)
+     * @param sendLatencyFaultEnable
+     */
     public void setSendLatencyFaultEnable(final boolean sendLatencyFaultEnable) {
         this.defaultMQProducerImpl.setSendLatencyFaultEnable(sendLatencyFaultEnable);
     }

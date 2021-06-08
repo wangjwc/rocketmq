@@ -43,6 +43,8 @@ public class MyProducerTest {
         DefaultMQProducer producer = new DefaultMQProducer(TEST_PRODUCER_GROUP);
         //producer.createTopic("", "", 1);
         producer.setNamesrvAddr(NAME_SERVER_ADDR);
+        // 是否开启故障规避处理策略
+        producer.setSendLatencyFaultEnable(true);
         producer.start();
 
         for (int i = 0; i < 10; i++) {

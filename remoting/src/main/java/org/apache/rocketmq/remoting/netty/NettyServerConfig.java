@@ -18,7 +18,9 @@ package org.apache.rocketmq.remoting.netty;
 
 public class NettyServerConfig implements Cloneable {
     /**
-     * NameServer 监昕端口，该值默认会被初始化为 9876 0
+     * 服务监昕端口：可在配置文件或启动命令中使用listenPort参数设置
+     * NameServer中该值默认会被初始化为 9876 0
+     * BrokerServer中则是10911
      */
     private int listenPort = 8888;
 

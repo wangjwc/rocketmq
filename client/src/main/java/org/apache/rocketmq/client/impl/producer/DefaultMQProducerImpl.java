@@ -62,8 +62,15 @@ public class DefaultMQProducerImpl implements MQProducerInner {
     private final InternalLogger log = ClientLogger.getLog();
     private final Random random = new Random();
     private final DefaultMQProducer defaultMQProducer;
+
+    /**
+     * topic发布信息缓存（包含队列、broker信息和基本路由策略的实现）
+     * 在updateTopicPublishInfo方法中更新
+     * @see DefaultMQProducerImpl#updateTopicPublishInfo(java.lang.String, org.apache.rocketmq.client.impl.producer.TopicPublishInfo)
+     */
     private final ConcurrentMap<String/* topic */, TopicPublishInfo> topicPublishInfoTable =
         new ConcurrentHashMap<String, TopicPublishInfo>();
+
     private final ArrayList<SendMessageHook> sendMessageHookList = new ArrayList<SendMessageHook>();
     private final RPCHook rpcHook;
     private final BlockingQueue<Runnable> asyncSenderThreadPoolQueue;
@@ -74,7 +81,15 @@ public class DefaultMQProducerImpl implements MQProducerInner {
     private ServiceState serviceState = ServiceState.CREATE_JUST;
     private MQClientInstance mQClientFactory;
     private ArrayList<CheckForbiddenHook> checkForbiddenHookList = new ArrayList<CheckForbiddenHook>();
+
+    /**
+     * 压缩等级: UtilAll.compress(body, zipCompressLevel) => new java.util.zip.Deflater(level)
+     */
     private int zipCompressLevel = Integer.parseInt(System.getProperty(MixAll.MESSAGE_COMPRESS_LEVEL, "5"));
+
+    /**
+     * produce队列负载均衡策略
+     */
     private MQFaultStrategy mqFaultStrategy = new MQFaultStrategy();
     private ExecutorService asyncSenderExecutor;
 
@@ -496,11 +511,24 @@ public class DefaultMQProducerImpl implements MQProducerInner {
 
     }
 
+    /**
+     * produce端负载均衡：从所有队列中选择一个 TopicPublishInfo.messageQueueList
+     * @param tpInfo
+     * @param lastBrokerName 发送一条信息时，如果是重试则传值，否则是空, 用来避免重试时使用同一个broker
+     * @return
+     */
     public MessageQueue selectOneMessageQueue(final TopicPublishInfo tpInfo, final String lastBrokerName) {
         return this.mqFaultStrategy.selectOneMessageQueue(tpInfo, lastBrokerName);
     }
 
+    /**
+     * 更新broker发送延迟，和是否隔离(仅在sendLatencyFaultEnable==true时有效)
+     * @param brokerName 本次投递的broker
+     * @param currentLatency 本次投递broker耗时
+     * @param isolation 是否隔离(隔离180秒，等待broker信息更新）（发送成功时false，失败时true）（ps：中断时也是false）
+     */
     public void updateFaultItem(final String brokerName, final long currentLatency, boolean isolation) {
+        // 仅在sendLatencyFaultEnable==true时有效
         this.mqFaultStrategy.updateFaultItem(brokerName, currentLatency, isolation);
     }
 
@@ -538,10 +566,10 @@ public class DefaultMQProducerImpl implements MQProducerInner {
             SendResult sendResult = null;
             int timesTotal = communicationMode == CommunicationMode.SYNC ? 1 + this.defaultMQProducer.getRetryTimesWhenSendFailed() : 1;
             int times = 0;
-            String[] brokersSent = new String[timesTotal];
+            String[] brokersSent = new String[timesTotal]; // 记录投递过的broker
             for (; times < timesTotal; times++) {
                 String lastBrokerName = null == mq ? null : mq.getBrokerName();
-                // 选择一个broker queue
+                // produce端负载均衡：从所有队列中选择一个 TopicPublishInfo.messageQueueList
                 MessageQueue mqSelected = this.selectOneMessageQueue(topicPublishInfo, lastBrokerName);
                 if (mqSelected != null) {
                     mq = mqSelected;
@@ -567,7 +595,7 @@ public class DefaultMQProducerImpl implements MQProducerInner {
                         // 执行发送
                         sendResult = this.sendKernelImpl(msg, mq, communicationMode, sendCallback, topicPublishInfo, timeout - costTime);
                         endTimestamp = System.currentTimeMillis();
-                        // 更新发送结果（用于sendLatencyFaultEnable=true时的路由策略）
+                        // 更新broker发送延迟，和是否隔离(仅在sendLatencyFaultEnable==true时有效)，用于负载均衡时的故障规避策略
                         this.updateFaultItem(mq.getBrokerName(), endTimestamp - beginTimestampPrev, false);
                         // 处理发送结果
                         switch (communicationMode) {
@@ -691,6 +719,7 @@ public class DefaultMQProducerImpl implements MQProducerInner {
         if (topicPublishInfo.isHaveTopicRouterInfo() || topicPublishInfo.ok()) {
             return topicPublishInfo;
         } else {
+            // 路由信息不存在，获取系统默认路由配置
             this.mQClientFactory.updateTopicRouteInfoFromNameServer(topic, true, this.defaultMQProducer);
             topicPublishInfo = this.topicPublishInfoTable.get(topic);
             return topicPublishInfo;
