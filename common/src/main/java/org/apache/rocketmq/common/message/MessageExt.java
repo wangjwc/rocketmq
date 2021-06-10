@@ -16,13 +16,14 @@
  */
 package org.apache.rocketmq.common.message;
 
+import org.apache.rocketmq.common.TopicFilterType;
+import org.apache.rocketmq.common.sysflag.MessageSysFlag;
+
 import java.net.Inet4Address;
 import java.net.InetAddress;
 import java.net.InetSocketAddress;
 import java.net.SocketAddress;
 import java.nio.ByteBuffer;
-import org.apache.rocketmq.common.TopicFilterType;
-import org.apache.rocketmq.common.sysflag.MessageSysFlag;
 
 public class MessageExt extends Message {
     private static final long serialVersionUID = 5720810158625748049L;
@@ -39,6 +40,9 @@ public class MessageExt extends Message {
     private SocketAddress bornHost;
 
     private long storeTimestamp;
+    /**
+     * 持久化消息的broker的host
+     */
     private SocketAddress storeHost;
     private String msgId;
     private long commitLogOffset;
@@ -68,6 +72,12 @@ public class MessageExt extends Message {
         return TopicFilterType.SINGLE_TAG;
     }
 
+    /**
+     * 将broker地址（ip+port）加入缓存（最后flip）
+     * @param socketAddress
+     * @param byteBuffer
+     * @return
+     */
     public static ByteBuffer socketAddress2ByteBuffer(final SocketAddress socketAddress, final ByteBuffer byteBuffer) {
         InetSocketAddress inetSocketAddress = (InetSocketAddress) socketAddress;
         InetAddress address = inetSocketAddress.getAddress();

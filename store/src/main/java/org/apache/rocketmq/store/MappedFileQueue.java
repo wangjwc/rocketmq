@@ -16,18 +16,15 @@
  */
 package org.apache.rocketmq.store;
 
-import java.io.File;
-import java.io.IOException;
-import java.util.ArrayList;
-import java.util.Arrays;
-import java.util.Iterator;
-import java.util.List;
-import java.util.ListIterator;
-import java.util.concurrent.CopyOnWriteArrayList;
 import org.apache.rocketmq.common.UtilAll;
 import org.apache.rocketmq.common.constant.LoggerName;
 import org.apache.rocketmq.logging.InternalLogger;
 import org.apache.rocketmq.logging.InternalLoggerFactory;
+
+import java.io.File;
+import java.io.IOException;
+import java.util.*;
+import java.util.concurrent.CopyOnWriteArrayList;
 
 public class MappedFileQueue {
     private static final InternalLogger log = InternalLoggerFactory.getLogger(LoggerName.STORE_LOGGER_NAME);
@@ -35,15 +32,34 @@ public class MappedFileQueue {
 
     private static final int DELETE_FILES_BATCH_MAX = 10;
 
+    /**
+     * 存储路径
+     */
     private final String storePath;
 
+    /**
+     * 每个新创建文件大小
+     */
     private final int mappedFileSize;
 
+    /**
+     * 文件列表
+     */
     private final CopyOnWriteArrayList<MappedFile> mappedFiles = new CopyOnWriteArrayList<MappedFile>();
 
+    /**
+     * 分配服务
+     */
     private final AllocateMappedFileService allocateMappedFileService;
 
+    /**
+     * 刷盘指针，标识该指针之前的所有数据全部持久化到磁盘了
+     */
     private long flushedWhere = 0;
+
+    /**
+     * 数据提交指针：即内存缓冲当前的写指针（大于等于flushedWhere）
+     */
     private long committedWhere = 0;
 
     private volatile long storeTimestamp = 0;
@@ -74,7 +90,14 @@ public class MappedFileQueue {
         }
     }
 
+    /**
+     * 根据消息存储时的时间戳来查找文件
+     * 从文件列表的第一个开始查找，找到第一个最后更新时间大于入参的文件后返回，如果不存在，则返回最后一个
+     * @param timestamp
+     * @return
+     */
     public MappedFile getMappedFileByTime(final long timestamp) {
+        // mappedFiles list => array
         Object[] mfs = this.copyMappedFiles(0);
 
         if (null == mfs)
@@ -82,11 +105,13 @@ public class MappedFileQueue {
 
         for (int i = 0; i < mfs.length; i++) {
             MappedFile mappedFile = (MappedFile) mfs[i];
+            // 返回第一个最后更新时间大于入参的文件
             if (mappedFile.getLastModifiedTimestamp() >= timestamp) {
                 return mappedFile;
             }
         }
 
+        // 未找到时，返回最后一个文件
         return (MappedFile) mfs[mfs.length - 1];
     }
 
@@ -191,24 +216,41 @@ public class MappedFileQueue {
         return 0;
     }
 
+    /**
+     * 获取最后的文件，当needCreate=true时，如果没有文件或者最后的文件满了，则创建新文件并加入队列
+     * @param startOffset
+     * @param needCreate
+     * @return
+     */
     public MappedFile getLastMappedFile(final long startOffset, boolean needCreate) {
         long createOffset = -1;
         MappedFile mappedFileLast = getLastMappedFile();
 
+        // 创建第一个文件
         if (mappedFileLast == null) {
+            // 按mappedFileSize大小的块设置起始偏移量 （根据上下文，实际startOffset参数都是0，所以createOffset=0）
+            // 0                   ~  1 * mappedFileSize => 0
+            // 1 * mappedFileSize  ~  2 * mappedFileSize => 1 * mappedFileSize
+            // 2 * mappedFileSize  ~  3 * mappedFileSize => 2 * mappedFileSize
             createOffset = startOffset - (startOffset % this.mappedFileSize);
         }
 
+        // 前一个文件满了，创建新文件
         if (mappedFileLast != null && mappedFileLast.isFull()) {
+            // 前一个文件的起始偏移量 + 文件大小 （这是为了让起始偏移量按固定大小增加)
             createOffset = mappedFileLast.getFileFromOffset() + this.mappedFileSize;
         }
 
         if (createOffset != -1 && needCreate) {
+            // createOffset作为20位长度文件名，长度不够左补0
             String nextFilePath = this.storePath + File.separator + UtilAll.offset2FileName(createOffset);
             String nextNextFilePath = this.storePath + File.separator
                 + UtilAll.offset2FileName(createOffset + this.mappedFileSize);
             MappedFile mappedFile = null;
 
+            /*
+             * 创建文件
+             */
             if (this.allocateMappedFileService != null) {
                 mappedFile = this.allocateMappedFileService.putRequestAndReturnMappedFile(nextFilePath,
                     nextNextFilePath, this.mappedFileSize);
@@ -220,6 +262,9 @@ public class MappedFileQueue {
                 }
             }
 
+            /*
+             * 新文件加入队列
+             */
             if (mappedFile != null) {
                 if (this.mappedFiles.isEmpty()) {
                     mappedFile.setFirstCreateInQueue(true);
@@ -233,13 +278,23 @@ public class MappedFileQueue {
         return mappedFileLast;
     }
 
+    /**
+     * 获取最后的文件，如果没有文件或者最后的文件满了，则创建新文件并加入队列
+     * @param startOffset
+     * @return
+     */
     public MappedFile getLastMappedFile(final long startOffset) {
         return getLastMappedFile(startOffset, true);
     }
 
+    /**
+     * 获取最后一个文件(即正在写入的）
+     * @return
+     */
     public MappedFile getLastMappedFile() {
         MappedFile mappedFileLast = null;
 
+        // // TODO 2021/6/9 上午11:27 这个循环表示看不懂, 难道是为了兼容普通List？？
         while (!this.mappedFiles.isEmpty()) {
             try {
                 mappedFileLast = this.mappedFiles.get(this.mappedFiles.size() - 1);

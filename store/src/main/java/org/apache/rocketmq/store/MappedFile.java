@@ -18,10 +18,17 @@ package org.apache.rocketmq.store;
 
 import com.sun.jna.NativeLong;
 import com.sun.jna.Pointer;
-import java.io.File;
-import java.io.FileNotFoundException;
-import java.io.IOException;
-import java.io.RandomAccessFile;
+import org.apache.rocketmq.common.UtilAll;
+import org.apache.rocketmq.common.constant.LoggerName;
+import org.apache.rocketmq.common.message.MessageExt;
+import org.apache.rocketmq.common.message.MessageExtBatch;
+import org.apache.rocketmq.logging.InternalLogger;
+import org.apache.rocketmq.logging.InternalLoggerFactory;
+import org.apache.rocketmq.store.config.FlushDiskType;
+import org.apache.rocketmq.store.util.LibC;
+import sun.nio.ch.DirectBuffer;
+
+import java.io.*;
 import java.lang.reflect.Method;
 import java.nio.ByteBuffer;
 import java.nio.MappedByteBuffer;
@@ -31,38 +38,93 @@ import java.security.AccessController;
 import java.security.PrivilegedAction;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
-import org.apache.rocketmq.common.UtilAll;
-import org.apache.rocketmq.common.constant.LoggerName;
-import org.apache.rocketmq.logging.InternalLogger;
-import org.apache.rocketmq.logging.InternalLoggerFactory;
-import org.apache.rocketmq.common.message.MessageExt;
-import org.apache.rocketmq.common.message.MessageExtBatch;
-import org.apache.rocketmq.store.config.FlushDiskType;
-import org.apache.rocketmq.store.util.LibC;
-import sun.nio.ch.DirectBuffer;
 
 public class MappedFile extends ReferenceResource {
+    /**
+     * 系统页大小，4K
+     */
     public static final int OS_PAGE_SIZE = 1024 * 4;
+
+    /**
+     * log
+     */
     protected static final InternalLogger log = InternalLoggerFactory.getLogger(LoggerName.STORE_LOGGER_NAME);
 
+    /**
+     * 当前JVM实例中MappedFile的虚拟内存
+     */
     private static final AtomicLong TOTAL_MAPPED_VIRTUAL_MEMORY = new AtomicLong(0);
 
+    /**
+     * 当前JVM实例中，MappedFile的数量
+     */
     private static final AtomicInteger TOTAL_MAPPED_FILES = new AtomicInteger(0);
+
+    /**
+     * 当前文件的写指针(指向下一个待写入的位置（byte）)
+     */
     protected final AtomicInteger wrotePosition = new AtomicInteger(0);
+
+    /**
+     * 当前文件的提交指针，如果开启transientStorePoolEnable，则数据会存储在TransientStorePool中，然后提交到内存映射ByteBuffer，最后刷盘写到磁盘
+     */
     protected final AtomicInteger committedPosition = new AtomicInteger(0);
+
+    /**
+     * 刷盘指针，指针之前的数据是已经持久化完成的
+     */
     private final AtomicInteger flushedPosition = new AtomicInteger(0);
+
+    /**
+     * 文件大小
+     */
     protected int fileSize;
+
+    /**
+     * file channel
+     */
     protected FileChannel fileChannel;
+
     /**
      * Message will put to here first, and then reput to FileChannel if writeBuffer is not null.
+     * 当transientStorePoolEnable=true时使用，消息先存储到buffer只用，然后再使用FileChannel提交到内存映射中
      */
     protected ByteBuffer writeBuffer = null;
+
+    /**
+     * 堆外内存缓冲池，当transientStorePoolEnable=true时使用
+     */
     protected TransientStorePool transientStorePool = null;
+
+    /**
+     * 文件名（实际是文件路径）
+     */
     private String fileName;
+
+    /**
+     * 文件存储的消息的起始偏移量（实际等于文件名）
+     * 该偏移量指的是该文件中存储的（或将要存储的）第一条消息在全部文件中的偏移量，是文件大小的整数倍
+     */
     private long fileFromOffset;
+
+    /**
+     * 物理文件对象
+     */
     private File file;
+
+    /**
+     * 内存映射Buffer
+     */
     private MappedByteBuffer mappedByteBuffer;
+
+    /**
+     * 最后一次写入时间
+     */
     private volatile long storeTimestamp = 0;
+
+    /**
+     * 是否是MappedFileQueue队列第一个文件
+     */
     private boolean firstCreateInQueue = false;
 
     public MappedFile() {
@@ -152,15 +214,21 @@ public class MappedFile extends ReferenceResource {
         this.fileName = fileName;
         this.fileSize = fileSize;
         this.file = new File(fileName);
+        // 文件名就是消息偏移量
         this.fileFromOffset = Long.parseLong(this.file.getName());
         boolean ok = false;
 
+        // 父目录不存在时创建
         ensureDirOK(this.file.getParent());
 
         try {
+            // 创建FileChannel(RandomAccessFile随机读写文件类，提供了文件任意读写功能）
             this.fileChannel = new RandomAccessFile(this.file, "rw").getChannel();
+            // 创建内存映射
             this.mappedByteBuffer = this.fileChannel.map(MapMode.READ_WRITE, 0, fileSize);
+            // 更新总内存大小
             TOTAL_MAPPED_VIRTUAL_MEMORY.addAndGet(fileSize);
+            // 更新总文件数
             TOTAL_MAPPED_FILES.incrementAndGet();
             ok = true;
         } catch (FileNotFoundException e) {
@@ -196,6 +264,14 @@ public class MappedFile extends ReferenceResource {
         return appendMessagesInner(messageExtBatch, cb);
     }
 
+    /**
+     * 追加消息
+     * @param messageExt
+     * @param cb
+     * @return
+     * @see org.apache.rocketmq.store.CommitLog.DefaultAppendMessageCallback 消息写入缓冲或内存映射
+     * @see org.apache.rocketmq.store.config.MessageStoreConfig#isTransientStorePoolEnable 是否开启内存缓冲
+     */
     public AppendMessageResult appendMessagesInner(final MessageExt messageExt, final AppendMessageCallback cb) {
         assert messageExt != null;
         assert cb != null;
@@ -203,6 +279,8 @@ public class MappedFile extends ReferenceResource {
         int currentPos = this.wrotePosition.get();
 
         if (currentPos < this.fileSize) {
+            // 优先选择内存缓冲，不存在时直接使用内存映射 org.apache.rocketmq.store.config.MessageStoreConfig.isTransientStorePoolEnable
+            // ps：slice方法虽然返回了一个新的Buffer对象，但新老buffer指向的内存是同一块,仅仅是起始偏移量不同
             ByteBuffer byteBuffer = writeBuffer != null ? writeBuffer.slice() : this.mappedByteBuffer.slice();
             byteBuffer.position(currentPos);
             AppendMessageResult result;
@@ -213,7 +291,9 @@ public class MappedFile extends ReferenceResource {
             } else {
                 return new AppendMessageResult(AppendMessageStatus.UNKNOWN_ERROR);
             }
+            // 移动指针
             this.wrotePosition.addAndGet(result.getWroteBytes());
+            // 记录写入时间
             this.storeTimestamp = result.getStoreTimestamp();
             return result;
         }

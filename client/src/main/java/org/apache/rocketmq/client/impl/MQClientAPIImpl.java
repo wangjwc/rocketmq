@@ -356,6 +356,7 @@ public class MQClientAPIImpl {
         String msgType = msg.getProperty(MessageConst.PROPERTY_MESSAGE_TYPE);
         boolean isReply = msgType != null && msgType.equals(MixAll.REPLY_MESSAGE_FLAG);
         if (isReply) {
+            // reply消息，等待该消息被消费成功并反馈（类似rpc）
             if (sendSmartMsg) {
                 SendMessageRequestHeaderV2 requestHeaderV2 = SendMessageRequestHeaderV2.createSendMessageRequestHeaderV2(requestHeader);
                 request = RemotingCommand.createRequestCommand(RequestCode.SEND_REPLY_MESSAGE_V2, requestHeaderV2);
@@ -363,7 +364,8 @@ public class MQClientAPIImpl {
                 request = RemotingCommand.createRequestCommand(RequestCode.SEND_REPLY_MESSAGE, requestHeader);
             }
         } else {
-            if (sendSmartMsg || msg instanceof MessageBatch) {
+            // 一般的异步消息（即生产者只管生产）
+            if (sendSmartMsg || msg instanceof MessageBatch) { // sendSmartMsg默认true
                 SendMessageRequestHeaderV2 requestHeaderV2 = SendMessageRequestHeaderV2.createSendMessageRequestHeaderV2(requestHeader);
                 request = RemotingCommand.createRequestCommand(msg instanceof MessageBatch ? RequestCode.SEND_BATCH_MESSAGE : RequestCode.SEND_MESSAGE_V2, requestHeaderV2);
             } else {

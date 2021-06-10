@@ -68,9 +68,11 @@ public class DefaultMQProducerImpl implements MQProducerInner {
      * 在updateTopicPublishInfo方法中更新
      * @see DefaultMQProducerImpl#updateTopicPublishInfo(java.lang.String, org.apache.rocketmq.client.impl.producer.TopicPublishInfo)
      */
-    private final ConcurrentMap<String/* topic */, TopicPublishInfo> topicPublishInfoTable =
-        new ConcurrentHashMap<String, TopicPublishInfo>();
+    private final ConcurrentMap<String/* topic */, TopicPublishInfo> topicPublishInfoTable = new ConcurrentHashMap<String, TopicPublishInfo>();
 
+    /**
+     * 发送消息前后自定义的操作(比如trace）
+     */
     private final ArrayList<SendMessageHook> sendMessageHookList = new ArrayList<SendMessageHook>();
     private final RPCHook rpcHook;
     private final BlockingQueue<Runnable> asyncSenderThreadPoolQueue;
@@ -742,6 +744,10 @@ public class DefaultMQProducerImpl implements MQProducerInner {
 
         SendMessageContext context = null;
         if (brokerAddr != null) {
+            /*
+             * broker的netty server会起两个通信服务。两个服务除了服务的端口号不一样，其他都一样。
+             * 其中一个的端口（配置端口-2）作为vip通道，客户端可以启用本设置项把发送消息此vip通道。
+             */
             brokerAddr = MixAll.brokerVIPChannel(this.defaultMQProducer.isSendMessageWithVIPChannel(), brokerAddr);
 
             byte[] prevBody = msg.getBody();
@@ -757,6 +763,9 @@ public class DefaultMQProducerImpl implements MQProducerInner {
                     topicWithNamespace = true;
                 }
 
+                /*
+                 * 通过或操作设置二进制标志位
+                 */
                 int sysFlag = 0;
                 boolean msgBodyCompressed = false;
                 if (this.tryToCompressMessage(msg)) {
@@ -769,6 +778,9 @@ public class DefaultMQProducerImpl implements MQProducerInner {
                     sysFlag |= MessageSysFlag.TRANSACTION_PREPARED_TYPE;
                 }
 
+                /*
+                 * // TODO 2021/6/8 下午4:27 不知道是啥，跳过
+                 */
                 if (hasCheckForbiddenHook()) {
                     CheckForbiddenContext checkForbiddenContext = new CheckForbiddenContext();
                     checkForbiddenContext.setNameSrvAddr(this.defaultMQProducer.getNamesrvAddr());
@@ -781,6 +793,10 @@ public class DefaultMQProducerImpl implements MQProducerInner {
                     this.executeCheckForbiddenHook(checkForbiddenContext);
                 }
 
+                /**
+                 * 执行发送消息前自定义操作(比如trace）
+                 * @see DefaultMQProducerImpl#registerSendMessageHook(SendMessageHook)
+                 */
                 if (this.hasSendMessageHook()) {
                     context = new SendMessageContext();
                     context.setProducer(this);
@@ -802,6 +818,9 @@ public class DefaultMQProducerImpl implements MQProducerInner {
                     this.executeSendMessageHookBefore(context);
                 }
 
+                /*
+                 * 构造网络请求header
+                 */
                 SendMessageRequestHeader requestHeader = new SendMessageRequestHeader();
                 requestHeader.setProducerGroup(this.defaultMQProducer.getProducerGroup());
                 requestHeader.setTopic(msg.getTopic());

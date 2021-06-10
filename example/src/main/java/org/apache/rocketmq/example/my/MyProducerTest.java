@@ -18,6 +18,7 @@ package org.apache.rocketmq.example.my;
 
 import org.apache.rocketmq.client.exception.MQClientException;
 import org.apache.rocketmq.client.producer.DefaultMQProducer;
+import org.apache.rocketmq.client.producer.MQProducer;
 import org.apache.rocketmq.client.producer.SendCallback;
 import org.apache.rocketmq.client.producer.SendResult;
 import org.apache.rocketmq.common.message.Message;
@@ -33,8 +34,7 @@ public class MyProducerTest {
     public static final String TEST_PRODUCER_GROUP = "wjw_test_producer_group";
     public static final String TEST_TOPIC = "wjw_test_topic";
 
-
-    public static void main(String[] args) throws MQClientException, InterruptedException {
+    public static MQProducer start() throws MQClientException {
         System.setProperty("rocketmq.client.logUseSlf4j", "true");
 
         /*
@@ -46,6 +46,11 @@ public class MyProducerTest {
         // 是否开启故障规避处理策略
         producer.setSendLatencyFaultEnable(true);
         producer.start();
+        return producer;
+    }
+
+    public static void main(String[] args) throws MQClientException, InterruptedException {
+        MQProducer producer = start();
 
         for (int i = 0; i < 10; i++) {
             try {

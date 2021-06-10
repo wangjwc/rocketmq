@@ -19,6 +19,9 @@ package org.apache.rocketmq.logging;
 
 import java.util.concurrent.ConcurrentHashMap;
 
+/**
+ * 除非调用setCurrentLoggerType指定inner方式，否则全部使用Slf4j
+ */
 public abstract class InternalLoggerFactory {
 
     public static final String LOGGER_SLF4J = "slf4j";
