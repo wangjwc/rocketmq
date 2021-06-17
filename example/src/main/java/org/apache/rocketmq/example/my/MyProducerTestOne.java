@@ -46,9 +46,12 @@ public class MyProducerTestOne {
         );
         msg.setWaitStoreMsgOK(true);
 
-        SendResult sendResult = producer.send(msg);
-        System.out.printf("%s%n", sendResult);
-
-        producer.shutdown();
+        try {
+            SendResult sendResult = producer.send(msg);
+            System.out.printf("%s%n", sendResult);
+        } catch (Exception e) {
+            e.printStackTrace();
+            producer.shutdown();
+        }
     }
 }

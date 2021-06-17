@@ -20,6 +20,7 @@ import org.apache.rocketmq.common.UtilAll;
 import org.apache.rocketmq.common.constant.LoggerName;
 import org.apache.rocketmq.logging.InternalLogger;
 import org.apache.rocketmq.logging.InternalLoggerFactory;
+import org.apache.rocketmq.store.config.MessageStoreConfig;
 
 import java.io.File;
 import java.io.IOException;
@@ -39,6 +40,7 @@ public class MappedFileQueue {
 
     /**
      * 每个新创建文件大小
+     * @see MessageStoreConfig#mappedFileSizeCommitLog
      */
     private final int mappedFileSize;
 
@@ -126,9 +128,13 @@ public class MappedFileQueue {
         return mfs;
     }
 
+    /**
+     * 根据最后一条完整消息的偏移量，设置下一条消息的写指针、刷新指针等(相当于把最后的非合法消息删除了truncate dirty）
+     * @param offset
+     */
     public void truncateDirtyFiles(long offset) {
         List<MappedFile> willRemoveFiles = new ArrayList<MappedFile>();
-
+        // 遍历所有文件，直到比offset大的偏移量地址，在根据offset计算该地址对应的文件中的物理地址
         for (MappedFile file : this.mappedFiles) {
             long fileTailOffset = file.getFileFromOffset() + this.mappedFileSize;
             if (fileTailOffset > offset) {
@@ -169,6 +175,10 @@ public class MappedFileQueue {
         }
     }
 
+    /**
+     * 加载CommitLog文件
+     * @return
+     */
     public boolean load() {
         File dir = new File(this.storePath);
         File[] files = dir.listFiles();

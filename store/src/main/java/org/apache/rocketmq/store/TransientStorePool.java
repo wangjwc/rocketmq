@@ -30,14 +30,32 @@ import java.util.Deque;
 import java.util.concurrent.ConcurrentLinkedDeque;
 
 /**
- * 对外内存缓冲池
+ * 堆外内存缓冲池
+ * 申请固定内存，并锁定（防止该内存被交换到磁盘交换区）
  */
 public class TransientStorePool {
     private static final InternalLogger log = InternalLoggerFactory.getLogger(LoggerName.STORE_LOGGER_NAME);
 
+    /**
+     * 缓冲个数(默认5）
+     * @see MessageStoreConfig#transientStorePoolSize
+     */
     private final int poolSize;
+
+    /**
+     * 每个缓冲大小(默认1G，和CommitLog文件大小一致）
+     * @see MessageStoreConfig#mappedFileSizeCommitLog
+     */
     private final int fileSize;
+
+    /**
+     * 初始化后的缓冲队列
+     */
     private final Deque<ByteBuffer> availableBuffers;
+
+    /**
+     * 配置
+     */
     private final MessageStoreConfig storeConfig;
 
     public TransientStorePool(final MessageStoreConfig storeConfig) {
@@ -49,12 +67,16 @@ public class TransientStorePool {
 
     /**
      * It's a heavy init method.
+     * 创建poolSize个堆外内存，并利用com.sun.jna.Library类库将该批内存锁定，避免被置换到交换区提高存储性能 。
      */
     public void init() {
         for (int i = 0; i < poolSize; i++) {
             // 申请堆外内存(默认1G）
             ByteBuffer byteBuffer = ByteBuffer.allocateDirect(fileSize);
 
+            /**
+             * 使用JNA调用本地库锁定内存
+             */
             final long address = ((DirectBuffer) byteBuffer).address();
             Pointer pointer = new Pointer(address);
             LibC.INSTANCE.mlock(pointer, new NativeLong(fileSize));

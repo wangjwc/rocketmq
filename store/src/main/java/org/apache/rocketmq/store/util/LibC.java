@@ -22,7 +22,18 @@ import com.sun.jna.NativeLong;
 import com.sun.jna.Platform;
 import com.sun.jna.Pointer;
 
+/**
+ * JNA: java native access
+ * NA提供一组Java工具类用于在运行期动态访问系统本地库（native library：如Window的dll）而不需要编写任何Native/JNI代码
+ * 开发人员只要在一个java接口中描述目标native library的函数与结构，JNA将自动实现Java接口到native function的映射。
+ *
+ * github: https://github.com/java-native-access/jna#readme
+ * http://java-native-access.github.io/jna/5.8.0/javadoc/
+ */
 public interface LibC extends Library {
+    /**
+     * 参考C标准库
+     */
     LibC INSTANCE = (LibC) Native.loadLibrary(Platform.isWindows() ? "msvcrt" : "c", LibC.class);
 
     int MADV_WILLNEED = 3;

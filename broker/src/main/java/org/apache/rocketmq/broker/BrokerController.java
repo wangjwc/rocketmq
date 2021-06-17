@@ -225,6 +225,7 @@ public class BrokerController {
             }
         }
 
+        // 加载消息存储文件（CommitLog文件）
         result = result && this.messageStore.load();
 
         if (result) {

@@ -16,11 +16,12 @@
  */
 package org.apache.rocketmq.common;
 
-import java.util.concurrent.TimeUnit;
-import java.util.concurrent.atomic.AtomicBoolean;
 import org.apache.rocketmq.common.constant.LoggerName;
 import org.apache.rocketmq.logging.InternalLogger;
 import org.apache.rocketmq.logging.InternalLoggerFactory;
+
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 public abstract class ServiceThread implements Runnable {
     private static final InternalLogger log = InternalLoggerFactory.getLogger(LoggerName.COMMON_LOGGER_NAME);
@@ -128,6 +129,7 @@ public abstract class ServiceThread implements Runnable {
 
     protected void waitForRunning(long interval) {
         if (hasNotified.compareAndSet(true, false)) {
+            // 等待中，返回
             this.onWaitEnd();
             return;
         }
@@ -136,10 +138,12 @@ public abstract class ServiceThread implements Runnable {
         waitPoint.reset();
 
         try {
+            // 等待interval毫秒
             waitPoint.await(interval, TimeUnit.MILLISECONDS);
         } catch (InterruptedException e) {
             log.error("Interrupted", e);
         } finally {
+            // 等待结束标识
             hasNotified.set(false);
             this.onWaitEnd();
         }

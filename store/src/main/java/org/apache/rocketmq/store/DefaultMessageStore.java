@@ -78,6 +78,7 @@ public class DefaultMessageStore implements MessageStore {
 
     /**
      * 消息队列文件ConsumerQueue刷盘线程
+     * @see FlushConsumeQueueService#doFlush(int)
      */
     private final FlushConsumeQueueService flushConsumeQueueService;
 
@@ -220,12 +221,16 @@ public class DefaultMessageStore implements MessageStore {
     }
 
     /**
+     * 加载消息存储文件（CommitLog）
      * @throws IOException
+     * @see org.apache.rocketmq.broker.BrokerController#initialize()
      */
     public boolean load() {
         boolean result = true;
 
         try {
+            // 上一次是否是正常退出
+            // broker在启动时创建abort文件，如果是正常退出会删除abort文件，否则文件存在表明上次是异常退出
             boolean lastExitOK = !this.isTempFileExist();
             log.info("last shutdown {}", lastExitOK ? "normally" : "abnormally");
 
@@ -327,10 +332,12 @@ public class DefaultMessageStore implements MessageStore {
             this.handleScheduleMessageService(messageStoreConfig.getBrokerRole());
         }
 
+        // 启动Consumer文件刷盘线程
         this.flushConsumeQueueService.start();
         this.commitLog.start();
         this.storeStatsService.start();
 
+        // 创建abort文件（正常退出时会删除该文件，因此如果下次启动时发现该文件，则说明是异常退出）
         this.createTempFile();
         this.addScheduleTask();
         this.shutdown = false;
@@ -366,6 +373,10 @@ public class DefaultMessageStore implements MessageStore {
             this.storeCheckpoint.shutdown();
 
             if (this.runningFlags.isWriteable() && dispatchBehindBytes() == 0) {
+                /**
+                 * 删除abort文件表明本次是正常退出
+                 * @see DefaultMessageStore#createTempFile()
+                 */
                 this.deleteFile(StorePathConfigHelper.getAbortFile(this.messageStoreConfig.getStorePathRootDir()));
                 shutDownNormal = true;
             } else {
@@ -388,6 +399,10 @@ public class DefaultMessageStore implements MessageStore {
         this.destroyLogics();
         this.commitLog.destroy();
         this.indexService.destroy();
+        /**
+         * 删除abort文件表明本次是正常退出
+         * @see DefaultMessageStore#createTempFile()
+         */
         this.deleteFile(StorePathConfigHelper.getAbortFile(this.messageStoreConfig.getStorePathRootDir()));
         this.deleteFile(StorePathConfigHelper.getStoreCheckpoint(this.messageStoreConfig.getStorePathRootDir()));
     }
@@ -1216,6 +1231,10 @@ public class DefaultMessageStore implements MessageStore {
         return this.reputMessageService.behind();
     }
 
+    /**
+     * 刷盘
+     * @return
+     */
     @Override
     public long flush() {
         return this.commitLog.flush();
@@ -1331,6 +1350,7 @@ public class DefaultMessageStore implements MessageStore {
     }
 
     /**
+     * 创建abort文件
      * @throws IOException
      */
     private void createTempFile() throws IOException {
@@ -1410,7 +1430,13 @@ public class DefaultMessageStore implements MessageStore {
         }
     }
 
+    /**
+     * broker在启动时创建abort文件，如果是正常退出会删除abort文件，否则文件存在表明上次是异常退出
+     * @return
+     * @see DefaultMessageStore#createTempFile()
+     */
     private boolean isTempFileExist() {
+        // 获取异常终止文件
         String fileName = StorePathConfigHelper.getAbortFile(this.messageStoreConfig.getStorePathRootDir());
         File file = new File(fileName);
         return file.exists();

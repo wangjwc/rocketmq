@@ -25,6 +25,7 @@ import org.apache.rocketmq.common.message.MessageExtBatch;
 import org.apache.rocketmq.logging.InternalLogger;
 import org.apache.rocketmq.logging.InternalLoggerFactory;
 import org.apache.rocketmq.store.config.FlushDiskType;
+import org.apache.rocketmq.store.config.MessageStoreConfig;
 import org.apache.rocketmq.store.util.LibC;
 import sun.nio.ch.DirectBuffer;
 
@@ -62,6 +63,7 @@ public class MappedFile extends ReferenceResource {
 
     /**
      * 当前文件的写指针(指向下一个待写入的位置（byte）)
+     * @see MappedFileQueue#truncateDirtyFiles(long)
      */
     protected final AtomicInteger wrotePosition = new AtomicInteger(0);
 
@@ -77,6 +79,8 @@ public class MappedFile extends ReferenceResource {
 
     /**
      * 文件大小
+     * @see MappedFileQueue#mappedFileSize
+     * @see MessageStoreConfig#mappedFileSizeCommitLog
      */
     protected int fileSize;
 
