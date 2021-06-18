@@ -92,11 +92,14 @@ public class CommitLog {
         this.defaultMessageStore = defaultMessageStore;
 
         if (FlushDiskType.SYNC_FLUSH == defaultMessageStore.getMessageStoreConfig().getFlushDiskType()) {
+            // 同步刷盘
             this.flushCommitLogService = new GroupCommitService();
         } else {
+            // 异步刷盘: 以文件内存映射方式读写的时候使用
             this.flushCommitLogService = new FlushRealTimeService();
         }
 
+        // 异步刷盘: 使用堆外内存缓冲池方式
         this.commitLogService = new CommitRealTimeService();
 
         this.appendMessageCallback = new DefaultAppendMessageCallback(defaultMessageStore.getMessageStoreConfig().getMaxMessageSize());
@@ -190,7 +193,7 @@ public class CommitLog {
 
     /**
      * When the normal exit, data recovery, all memory data have been flush
-     * 恢复MappedFile的状态（
+     * 恢复MappedFile的状态（刷盘指针、数据提交指针、当前文件的写指针）
      */
     public void recoverNormally(long maxPhyOffsetOfConsumeQueue) {
         boolean checkCRCOnRecover = this.defaultMessageStore.getMessageStoreConfig().isCheckCRCOnRecover();
@@ -596,6 +599,7 @@ public class CommitLog {
      * 写文件
      * @param msg
      * @return
+     * @see MappedFile#appendMessage(org.apache.rocketmq.store.MessageExtBrokerInner, org.apache.rocketmq.store.AppendMessageCallback)
      */
     public CompletableFuture<PutMessageResult> asyncPutMessage(final MessageExtBrokerInner msg) {
         // Set the storage time 设置存储时间
@@ -663,11 +667,17 @@ public class CommitLog {
                 return CompletableFuture.completedFuture(new PutMessageResult(PutMessageStatus.CREATE_MAPEDFILE_FAILED, null));
             }
 
+            /*
+             * 写文件（缓冲）
+             */
             result = mappedFile.appendMessage(msg, this.appendMessageCallback);
             switch (result.getStatus()) {
                 case PUT_OK:
                     break;
                 case END_OF_FILE:
+                    /*
+                     * 文件已满导致写入失败，重新创建新文件写入
+                     */
                     unlockMappedFile = mappedFile;
                     // Create a new file, re-write the message
                     mappedFile = this.mappedFileQueue.getLastMappedFile(0);
@@ -679,8 +689,8 @@ public class CommitLog {
                     }
                     result = mappedFile.appendMessage(msg, this.appendMessageCallback);
                     break;
-                case MESSAGE_SIZE_EXCEEDED:
-                case PROPERTIES_SIZE_EXCEEDED:
+                case MESSAGE_SIZE_EXCEEDED: // 消息长度超过限制：org.apache.rocketmq.store.config.MessageStoreConfig.maxMessageSize
+                case PROPERTIES_SIZE_EXCEEDED: // 消息properties属性字节数 > Short.MAX_VALUE
                     beginTimeInLock = 0;
                     return CompletableFuture.completedFuture(new PutMessageResult(PutMessageStatus.MESSAGE_ILLEGAL, result));
                 case UNKNOWN_ERROR:
@@ -715,6 +725,7 @@ public class CommitLog {
         CompletableFuture<PutMessageStatus> flushResultFuture = submitFlushRequest(result, putMessageResult, msg);
         // 提交备份请求
         CompletableFuture<PutMessageStatus> replicaResultFuture = submitReplicaRequest(result, putMessageResult, msg);
+        // 当两个future都成功时执行回调
         return flushResultFuture.thenCombine(replicaResultFuture, (flushStatus, replicaStatus) -> {
             if (flushStatus != PutMessageStatus.PUT_OK) {
                 putMessageResult.setPutMessageStatus(PutMessageStatus.FLUSH_DISK_TIMEOUT);
@@ -952,34 +963,53 @@ public class CommitLog {
         return putMessageResult;
     }
 
+    /**
+     * 提交刷盘请求
+     * 同步刷盘
+     *  isWaitStoreMsgOK = true：返回异步future
+     *  isWaitStoreMsgOK = false: 返回已完成的future
+     * @param result
+     * @param putMessageResult
+     * @param messageExt
+     * @return
+     */
     public CompletableFuture<PutMessageStatus> submitFlushRequest(AppendMessageResult result, PutMessageResult putMessageResult,
                                                                   MessageExt messageExt) {
-        // Synchronization flush
+        // Synchronization flush 同步刷盘
         if (FlushDiskType.SYNC_FLUSH == this.defaultMessageStore.getMessageStoreConfig().getFlushDiskType()) {
             final GroupCommitService service = (GroupCommitService) this.flushCommitLogService;
+            // 是否等待刷盘完成再返回
             if (messageExt.isWaitStoreMsgOK()) {
                 GroupCommitRequest request = new GroupCommitRequest(result.getWroteOffset() + result.getWroteBytes(),
                         this.defaultMessageStore.getMessageStoreConfig().getSyncFlushTimeout());
+                // 提交刷盘请求（将request加入队列并触发刷盘线程执行）
                 service.putRequest(request);
+                // 返回future，以便等待执行完成
                 return request.future();
             } else {
+                // 触发刷盘线程执行
                 service.wakeup();
                 return CompletableFuture.completedFuture(PutMessageStatus.PUT_OK);
             }
         }
-        // Asynchronous flush
+        // Asynchronous flush 异步刷盘
         else {
             if (!this.defaultMessageStore.getMessageStoreConfig().isTransientStorePoolEnable()) {
+                // 唤醒刷盘线程：使用文件内存映射方式
                 flushCommitLogService.wakeup();
             } else  {
+                // 唤醒刷盘线程：使用堆外内存缓冲池方式
                 commitLogService.wakeup();
             }
+            // 构造future，直接就是完成状态
             return CompletableFuture.completedFuture(PutMessageStatus.PUT_OK);
         }
     }
 
     public CompletableFuture<PutMessageStatus> submitReplicaRequest(AppendMessageResult result, PutMessageResult putMessageResult,
                                                         MessageExt messageExt) {
+        // 同步master
+        // org.apache.rocketmq.store.config.MessageStoreConfig.brokerRole，默认BrokerRole.ASYNC_MASTER
         if (BrokerRole.SYNC_MASTER == this.defaultMessageStore.getMessageStoreConfig().getBrokerRole()) {
             HAService service = this.defaultMessageStore.getHaService();
             if (messageExt.isWaitStoreMsgOK()) {
@@ -995,6 +1025,7 @@ public class CommitLog {
                 }
             }
         }
+        // 构造future
         return CompletableFuture.completedFuture(PutMessageStatus.PUT_OK);
     }
 
@@ -1452,11 +1483,17 @@ public class CommitLog {
 
     /**
      * GroupCommit Service
+     * 同步刷盘
      */
     class GroupCommitService extends FlushCommitLogService {
         private volatile List<GroupCommitRequest> requestsWrite = new ArrayList<GroupCommitRequest>();
         private volatile List<GroupCommitRequest> requestsRead = new ArrayList<GroupCommitRequest>();
 
+        /**
+         * 提交刷盘请求（将request加入队列并触发线程执行）
+         * 可以使用org.apache.rocketmq.store.CommitLog.GroupCommitRequest#flushOKFuture等待刷盘完成
+         * @param request
+         */
         public synchronized void putRequest(final GroupCommitRequest request) {
             synchronized (this.requestsWrite) {
                 this.requestsWrite.add(request);
@@ -1593,6 +1630,7 @@ public class CommitLog {
          * @param msgInner 消息体
          * @return
          * @see MappedFile#appendMessagesInner(org.apache.rocketmq.common.message.MessageExt, org.apache.rocketmq.store.AppendMessageCallback)
+         * @see CommitLog.DefaultAppendMessageCallback#doAppend(long, java.nio.ByteBuffer, int, org.apache.rocketmq.store.MessageExtBrokerInner) 消息写入缓冲或内存映射具体实现
          */
         public AppendMessageResult doAppend(final long fileFromOffset, final ByteBuffer byteBuffer, final int maxBlank,
             final MessageExtBrokerInner msgInner) {

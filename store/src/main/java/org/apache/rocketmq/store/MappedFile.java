@@ -62,13 +62,14 @@ public class MappedFile extends ReferenceResource {
     private static final AtomicInteger TOTAL_MAPPED_FILES = new AtomicInteger(0);
 
     /**
-     * 当前文件的写指针(指向下一个待写入的位置（byte）)
+     * 当前文件的写指针: 文件映射方式(指向下一个待写入的位置（byte）)
      * @see MappedFileQueue#truncateDirtyFiles(long)
      */
     protected final AtomicInteger wrotePosition = new AtomicInteger(0);
 
     /**
-     * 当前文件的提交指针，如果开启transientStorePoolEnable，则数据会存储在TransientStorePool中，然后提交到内存映射ByteBuffer，最后刷盘写到磁盘
+     * 当前文件的写指针: 堆外内存池方式：当前文件的提交指针
+     * ps: 如果开启transientStorePoolEnable，则数据会存储在TransientStorePool中，然后提交到内存映射ByteBuffer，最后刷盘写到磁盘
      */
     protected final AtomicInteger committedPosition = new AtomicInteger(0);
 
@@ -117,7 +118,7 @@ public class MappedFile extends ReferenceResource {
     private File file;
 
     /**
-     * 内存映射Buffer
+     * 文件内存映射Buffer
      */
     private MappedByteBuffer mappedByteBuffer;
 
@@ -273,7 +274,7 @@ public class MappedFile extends ReferenceResource {
      * @param messageExt
      * @param cb
      * @return
-     * @see org.apache.rocketmq.store.CommitLog.DefaultAppendMessageCallback 消息写入缓冲或内存映射
+     * @see CommitLog.DefaultAppendMessageCallback#doAppend(long, java.nio.ByteBuffer, int, org.apache.rocketmq.store.MessageExtBrokerInner) 消息写入缓冲或内存映射
      * @see org.apache.rocketmq.store.config.MessageStoreConfig#isTransientStorePoolEnable 是否开启内存缓冲
      */
     public AppendMessageResult appendMessagesInner(final MessageExt messageExt, final AppendMessageCallback cb) {
@@ -351,14 +352,18 @@ public class MappedFile extends ReferenceResource {
 
     /**
      * @return The current flushed position
+     * 当前文件刷盘
      */
     public int flush(final int flushLeastPages) {
+        // 是否有足够的新增消息可以刷盘
         if (this.isAbleToFlush(flushLeastPages)) {
+            // hold防并发
             if (this.hold()) {
                 int value = getReadPosition();
 
                 try {
                     //We only append data to fileChannel or mappedByteBuffer, never both.
+                    // 刷盘
                     if (writeBuffer != null || this.fileChannel.position() != 0) {
                         this.fileChannel.force(false);
                     } else {
@@ -368,7 +373,9 @@ public class MappedFile extends ReferenceResource {
                     log.error("Error occurred when force data to disk.", e);
                 }
 
+                // 更新刷盘指针
                 this.flushedPosition.set(value);
+                // 释放hold
                 this.release();
             } else {
                 log.warn("in flush, hold failed, flush offset = " + this.flushedPosition.get());
@@ -378,6 +385,11 @@ public class MappedFile extends ReferenceResource {
         return this.getFlushedPosition();
     }
 
+    /**
+     * 将内存缓冲写入FileChannel
+     * @param commitLeastPages
+     * @return
+     */
     public int commit(final int commitLeastPages) {
         if (writeBuffer == null) {
             //no need to commit data to file channel, so just regard wrotePosition as committedPosition.
@@ -401,12 +413,21 @@ public class MappedFile extends ReferenceResource {
         return this.committedPosition.get();
     }
 
+    /**
+     * 将内存缓冲写入FileChannel
+     * @param commitLeastPages
+     */
     protected void commit0(final int commitLeastPages) {
         int writePos = this.wrotePosition.get();
         int lastCommittedPosition = this.committedPosition.get();
 
         if (writePos - this.committedPosition.get() > 0) {
             try {
+                /*
+                 * 1、buffer大小和file一致
+                 * 2、消息写入缓存时，写入的是writeBuffer.slice()，所以并不影响其position，所以writeBuffer的position一直是0
+                 * 3、所以此处的writeBuffer.slice()，其起始偏移量和writeBuffer相同。所以可以靠committedPosition来确定写入起始点
+                 */
                 ByteBuffer byteBuffer = writeBuffer.slice();
                 byteBuffer.position(lastCommittedPosition);
                 byteBuffer.limit(writePos);
@@ -419,18 +440,28 @@ public class MappedFile extends ReferenceResource {
         }
     }
 
+    /**
+     * 是否已经准备好可以刷盘
+     * @param flushLeastPages 本次刷盘至少处理的文件页数（每页4kb）,当等于0时，表示只要有新增消息就刷盘
+     * @return
+     */
     private boolean isAbleToFlush(final int flushLeastPages) {
+        // 刷盘指针
         int flush = this.flushedPosition.get();
+        // 写指针
         int write = getReadPosition();
 
+        // 文件已满
         if (this.isFull()) {
             return true;
         }
 
         if (flushLeastPages > 0) {
+            // 当前写消息的页数 - 已刷盘页数 >= 要刷盘的页数
             return ((write / OS_PAGE_SIZE) - (flush / OS_PAGE_SIZE)) >= flushLeastPages;
         }
 
+        // flushLeastPages=0 表示只要有新增消息就刷盘
         return write > flush;
     }
 
@@ -555,6 +586,7 @@ public class MappedFile extends ReferenceResource {
     }
 
     /**
+     * 获取写入指针
      * @return The max position which have valid data
      */
     public int getReadPosition() {

@@ -34,7 +34,7 @@ public class MyProducerTest {
     public static final String TEST_PRODUCER_GROUP = "wjw_test_producer_group";
     public static final String TEST_TOPIC = "wjw_test_topic";
 
-    public static MQProducer start() throws MQClientException {
+    public static DefaultMQProducer start() throws MQClientException {
         System.setProperty("rocketmq.client.logUseSlf4j", "true");
 
         /*

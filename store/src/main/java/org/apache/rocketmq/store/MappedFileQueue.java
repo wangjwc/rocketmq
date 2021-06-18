@@ -262,9 +262,11 @@ public class MappedFileQueue {
              * 创建文件
              */
             if (this.allocateMappedFileService != null) {
+                // 生产端文件创建走这个分支
                 mappedFile = this.allocateMappedFileService.putRequestAndReturnMappedFile(nextFilePath,
                     nextNextFilePath, this.mappedFileSize);
             } else {
+                // 消费端文件创建走这个分支
                 try {
                     mappedFile = new MappedFile(nextFilePath, this.mappedFileSize);
                 } catch (IOException e) {
@@ -487,11 +489,20 @@ public class MappedFileQueue {
         return deleteCount;
     }
 
+    /**
+     * 刷盘
+     * @param flushLeastPages
+     * @return
+     * @see CommitLog.GroupCommitService#doCommit()
+     * @coller org.apache.rocketmq.store.CommitLog.GroupCommitService#doCommit()
+     */
     public boolean flush(final int flushLeastPages) {
         boolean result = true;
+        // 根据刷盘指针获取尚未刷盘的文件
         MappedFile mappedFile = this.findMappedFileByOffset(this.flushedWhere, this.flushedWhere == 0);
         if (mappedFile != null) {
             long tmpTimeStamp = mappedFile.getStoreTimestamp();
+            // 刷盘
             int offset = mappedFile.flush(flushLeastPages);
             long where = mappedFile.getFileFromOffset() + offset;
             result = where == this.flushedWhere;
@@ -530,6 +541,7 @@ public class MappedFileQueue {
             MappedFile lastMappedFile = this.getLastMappedFile();
             if (firstMappedFile != null && lastMappedFile != null) {
                 if (offset < firstMappedFile.getFileFromOffset() || offset >= lastMappedFile.getFileFromOffset() + this.mappedFileSize) {
+                    // 超出范围
                     LOG_ERROR.warn("Offset not matched. Request offset: {}, firstOffset: {}, lastOffset: {}, mappedFileSize: {}, mappedFiles count: {}",
                         offset,
                         firstMappedFile.getFileFromOffset(),
@@ -537,6 +549,8 @@ public class MappedFileQueue {
                         this.mappedFileSize,
                         this.mappedFiles.size());
                 } else {
+                    // 假如第一个文件的偏移量是零，则index = offset / this.mappedFileSize
+                    // 由于为了节省空间可能删除最找的文件，所以实际index = offset / this.mappedFileSize - 现在第一个文件在未删除时的index
                     int index = (int) ((offset / this.mappedFileSize) - (firstMappedFile.getFileFromOffset() / this.mappedFileSize));
                     MappedFile targetFile = null;
                     try {
@@ -544,11 +558,13 @@ public class MappedFileQueue {
                     } catch (Exception ignored) {
                     }
 
+                    // 确保不超出范围
                     if (targetFile != null && offset >= targetFile.getFileFromOffset()
                         && offset < targetFile.getFileFromOffset() + this.mappedFileSize) {
                         return targetFile;
                     }
 
+                    // 兜底，遍历的方式查找
                     for (MappedFile tmpMappedFile : this.mappedFiles) {
                         if (offset >= tmpMappedFile.getFileFromOffset()
                             && offset < tmpMappedFile.getFileFromOffset() + this.mappedFileSize) {

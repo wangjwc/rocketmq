@@ -16,13 +16,10 @@
  */
 package org.apache.rocketmq.example.my;
 
-import org.apache.rocketmq.client.exception.MQBrokerException;
 import org.apache.rocketmq.client.exception.MQClientException;
 import org.apache.rocketmq.client.producer.DefaultMQProducer;
-import org.apache.rocketmq.client.producer.MQProducer;
 import org.apache.rocketmq.client.producer.SendResult;
 import org.apache.rocketmq.common.message.Message;
-import org.apache.rocketmq.remoting.exception.RemotingException;
 
 import java.nio.charset.StandardCharsets;
 
@@ -37,9 +34,10 @@ public class MyProducerTestOne {
     public static final String TEST_TOPIC = "wjw_test_topic";
 
 
-    public static void main(String[] args) throws MQClientException, InterruptedException, RemotingException, MQBrokerException {
-        MQProducer producer = start();
-
+    public static void main(String[] args) throws MQClientException {
+        DefaultMQProducer producer = start();
+        producer.setRetryTimesWhenSendFailed(0);
+        producer.setSendMsgTimeout(1000 * 100);
         Message msg = new Message(TEST_TOPIC /* Topic */,
                 "TagA" /* Tag */,
                 ("Hello RocketMQ " + System.currentTimeMillis()).getBytes(StandardCharsets.UTF_8) /* Message body */
